@@ -1,0 +1,40 @@
+# node mmodules
+# This file is used to ignore files and directories in the backend directory
+# that should not be tracked by Git.    
+*/node_modules/
+*node_modules/
+node_modules/
+# Ignore build artifacts
+/build/
+# Ignore logs
+*.log
+# Ignore environment files
+.env
+# Ignore IDE specific files
+.idea/
+# Ignore temporary files
+*.tmp
+# Ignore coverage reports
+/coverage/
+# Ignore generated files
+*.g.dart
+# Ignore pubspec.lock
+pubspec.lock
+# Ignore Dart analysis options
+analysis_options.yaml
+# Ignore test coverage files
+*.lcov
+# Ignore generated documentation
+/doc/api/
+# Ignore temporary editor files
+*.swp
+# Ignore VS Code settings
+.vscode/
+# Ignore IntelliJ IDEA settings
+*.iml
+# Ignore Dart SDK files
+.dart_tool/
+# Ignore Flutter build files
+/flutter_build/
+# Ignore generated localization files
+/lib/l10n/*.dart
