@@ -3,7 +3,7 @@
  * Handles crop listing, searching, and management
  */
 
-const db = require('../config/database');
+const { Crop, User, Review } = require('../models');
 
 // Get all crops with pagination and filtering
 const getAllCrops = async (req, res) => {
@@ -21,77 +21,56 @@ const getAllCrops = async (req, res) => {
         } = req.query;
 
         const offset = (page - 1) * limit;
-        let whereConditions = ['c.status = $1'];
-        let params = ['available'];
-        let paramIndex = 2;
+        let whereConditions = { status: 'available' };
+        let include = [
+            {
+                model: User,
+                as: 'farmer',
+                attributes: ['name', 'phone', 'verified']
+            },
+            {
+                model: Review,
+                as: 'reviews',
+                attributes: ['id'],
+                required: false
+            }
+        ];
 
         // Add search filter
         if (search) {
-            whereConditions.push(`(c.name ILIKE $${paramIndex} OR u.name ILIKE $${paramIndex} OR c.location ILIKE $${paramIndex})`);
-            params.push(`%${search}%`);
-            paramIndex++;
+            whereConditions[Op.or] = [
+                { name: { [Op.iLike]: `%${search}%` } },
+                { '$farmer.name$': { [Op.iLike]: `%${search}%` } },
+                { location: { [Op.iLike]: `%${search}%` } }
+            ];
         }
 
         // Add category filter
         if (category && category !== 'all') {
-            whereConditions.push(`c.category = $${paramIndex}`);
-            params.push(category);
-            paramIndex++;
+            whereConditions.category = category;
         }
 
         // Add location filter
         if (location) {
-            whereConditions.push(`c.location ILIKE $${paramIndex}`);
-            params.push(`%${location}%`);
-            paramIndex++;
+            whereConditions.location = { [Op.iLike]: `%${location}%` };
         }
 
         // Add price range filter
         if (minPrice) {
-            whereConditions.push(`c.price_per_unit >= $${paramIndex}`);
-            params.push(minPrice);
-            paramIndex++;
+            whereConditions.price_per_unit = { [Op.gte]: minPrice };
         }
 
         if (maxPrice) {
-            whereConditions.push(`c.price_per_unit <= $${paramIndex}`);
-            params.push(maxPrice);
-            paramIndex++;
+            whereConditions.price_per_unit = { [Op.lte]: maxPrice };
         }
 
-        const whereClause = whereConditions.join(' AND ');
-
-        // Add pagination params
-        params.push(limit, offset);
-
-        const query = `
-      SELECT 
-        c.*,
-        u.name as farmer_name,
-        u.phone as farmer_phone,
-        u.verified as farmer_verified,
-        COALESCE(AVG(r.rating), 0) as avg_rating,
-        COUNT(r.id) as review_count
-      FROM crops c
-      LEFT JOIN users u ON c.farmer_id = u.id
-      LEFT JOIN reviews r ON u.id = r.reviewed_user_id
-      WHERE ${whereClause}
-      GROUP BY c.id, u.id
-      ORDER BY ${sortBy} ${sortOrder}
-      LIMIT $${paramIndex - 1} OFFSET $${paramIndex}
-    `;
-
-        const result = await db.query(query, params);
-
-        // Get total count for pagination
-        const countQuery = `
-      SELECT COUNT(DISTINCT c.id) as total
-      FROM crops c
-      LEFT JOIN users u ON c.farmer_id = u.id
-      WHERE ${whereClause}
-    `;
-        const countResult = await db.query(countQuery, params.slice(0, -2));
-        const total = parseInt(countResult.rows[0].total);
+        const result = await Crop.findAndCountAll({
+            where: whereConditions,
+            include,
+            order: [[sortBy, sortOrder]],
+            limit,
+            offset
+        });
 
         res.json({
             success: true,
@@ -100,8 +79,8 @@ const getAllCrops = async (req, res) => {
                 pagination: {
                     page: parseInt(page),
                     limit: parseInt(limit),
-                    total,
-                    pages: Math.ceil(total / limit)
+                    total: result.count,
+                    pages: Math.ceil(result.count / limit)
                 }
             }
         });
@@ -119,26 +98,23 @@ const getCropById = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const query = `
-      SELECT 
-        c.*,
-        u.name as farmer_name,
-        u.phone as farmer_phone,
-        u.email as farmer_email,
-        u.location as farmer_location,
-        u.verified as farmer_verified,
-        COALESCE(AVG(r.rating), 0) as avg_rating,
-        COUNT(r.id) as review_count
-      FROM crops c
-      LEFT JOIN users u ON c.farmer_id = u.id
-      LEFT JOIN reviews r ON u.id = r.reviewed_user_id
-      WHERE c.id = $1
-      GROUP BY c.id, u.id
-    `;
+        const result = await Crop.findOne({
+            where: { id },
+            include: [
+                {
+                    model: User,
+                    as: 'farmer',
+                    attributes: ['name', 'phone', 'email', 'location', 'verified']
+                },
+                {
+                    model: Review,
+                    as: 'reviews',
+                    attributes: ['id']
+                }
+            ]
+        });
 
-        const result = await db.query(query, [id]);
-
-        if (result.rows.length === 0) {
+        if (!result) {
             return res.status(404).json({
                 success: false,
                 message: 'Crop not found'
@@ -147,7 +123,7 @@ const getCropById = async (req, res) => {
 
         res.json({
             success: true,
-            data: result.rows[0]
+            data: result
         });
     } catch (error) {
         console.error('Error fetching crop:', error);
@@ -177,27 +153,26 @@ const createCrop = async (req, res) => {
 
         const farmer_id = req.user.id;
 
-        const query = `
-      INSERT INTO crops (
-        farmer_id, name, category, description, price_per_unit, unit,
-        quantity_available, location, harvest_date, expiry_date,
-        organic, quality_grade, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-      RETURNING *
-    `;
-
-        const values = [
-            farmer_id, name, category, description, price_per_unit, unit,
-            quantity_available, location, harvest_date, expiry_date,
-            organic || false, quality_grade || 'standard', 'available'
-        ];
-
-        const result = await db.query(query, values);
+        const crop = await Crop.create({
+            farmer_id,
+            name,
+            category,
+            description,
+            price_per_unit,
+            unit,
+            quantity_available,
+            location,
+            harvest_date,
+            expiry_date,
+            organic: organic || false,
+            quality_grade: quality_grade || 'standard',
+            status: 'available'
+        });
 
         res.status(201).json({
             success: true,
             message: 'Crop listed successfully',
-            data: result.rows[0]
+            data: crop
         });
     } catch (error) {
         console.error('Error creating crop:', error);
@@ -216,65 +191,31 @@ const updateCrop = async (req, res) => {
         const updateFields = req.body;
 
         // Check if crop belongs to the farmer
-        const checkQuery = 'SELECT farmer_id FROM crops WHERE id = $1';
-        const checkResult = await db.query(checkQuery, [id]);
+        const crop = await Crop.findOne({ where: { id } });
 
-        if (checkResult.rows.length === 0) {
+        if (!crop) {
             return res.status(404).json({
                 success: false,
                 message: 'Crop not found'
             });
         }
 
-        if (checkResult.rows[0].farmer_id !== farmer_id) {
+        if (crop.farmer_id !== farmer_id) {
             return res.status(403).json({
                 success: false,
                 message: 'You can only update your own crops'
             });
         }
 
-        // Build dynamic update query
-        const allowedFields = [
-            'name', 'category', 'description', 'price_per_unit', 'unit',
-            'quantity_available', 'location', 'harvest_date', 'expiry_date',
-            'organic', 'quality_grade', 'status'
-        ];
+        // Update crop
+        await Crop.update(updateFields, { where: { id } });
 
-        const updates = [];
-        const values = [];
-        let paramIndex = 1;
-
-        Object.keys(updateFields).forEach(field => {
-            if (allowedFields.includes(field)) {
-                updates.push(`${field} = $${paramIndex}`);
-                values.push(updateFields[field]);
-                paramIndex++;
-            }
-        });
-
-        if (updates.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'No valid fields to update'
-            });
-        }
-
-        updates.push(`updated_at = NOW()`);
-        values.push(id);
-
-        const query = `
-      UPDATE crops 
-      SET ${updates.join(', ')}
-      WHERE id = $${paramIndex}
-      RETURNING *
-    `;
-
-        const result = await db.query(query, values);
+        const updatedCrop = await Crop.findByPk(id);
 
         res.json({
             success: true,
             message: 'Crop updated successfully',
-            data: result.rows[0]
+            data: updatedCrop
         });
     } catch (error) {
         console.error('Error updating crop:', error);
@@ -292,17 +233,16 @@ const deleteCrop = async (req, res) => {
         const farmer_id = req.user.id;
 
         // Check if crop belongs to the farmer
-        const checkQuery = 'SELECT farmer_id FROM crops WHERE id = $1';
-        const checkResult = await db.query(checkQuery, [id]);
+        const crop = await Crop.findOne({ where: { id } });
 
-        if (checkResult.rows.length === 0) {
+        if (!crop) {
             return res.status(404).json({
                 success: false,
                 message: 'Crop not found'
             });
         }
 
-        if (checkResult.rows[0].farmer_id !== farmer_id) {
+        if (crop.farmer_id !== farmer_id) {
             return res.status(403).json({
                 success: false,
                 message: 'You can only delete your own crops'
@@ -310,8 +250,7 @@ const deleteCrop = async (req, res) => {
         }
 
         // Soft delete (update status to 'deleted')
-        const query = 'UPDATE crops SET status = $1, updated_at = NOW() WHERE id = $2';
-        await db.query(query, ['deleted', id]);
+        await Crop.update({ status: 'deleted' }, { where: { id } });
 
         res.json({
             success: true,
@@ -332,23 +271,22 @@ const getFarmerCrops = async (req, res) => {
         const farmer_id = req.user.id;
         const { status = 'available' } = req.query;
 
-        const query = `
-      SELECT 
-        c.*,
-        COUNT(o.id) as order_count,
-        SUM(CASE WHEN o.status = 'completed' THEN o.total_amount ELSE 0 END) as total_earnings
-      FROM crops c
-      LEFT JOIN orders o ON c.id = o.crop_id
-      WHERE c.farmer_id = $1 AND c.status = $2
-      GROUP BY c.id
-      ORDER BY c.created_at DESC
-    `;
-
-        const result = await db.query(query, [farmer_id, status]);
+        const result = await Crop.findAll({
+            where: { farmer_id, status },
+            include: [
+                {
+                    model: Order,
+                    as: 'orders',
+                    attributes: ['id', 'status', 'total_amount'],
+                    required: false
+                }
+            ],
+            order: [['created_at', 'DESC']]
+        });
 
         res.json({
             success: true,
-            data: result.rows
+            data: result
         });
     } catch (error) {
         console.error('Error fetching farmer crops:', error);
@@ -362,21 +300,16 @@ const getFarmerCrops = async (req, res) => {
 // Get crop categories with counts
 const getCropCategories = async (req, res) => {
     try {
-        const query = `
-      SELECT 
-        category,
-        COUNT(*) as count
-      FROM crops
-      WHERE status = 'available'
-      GROUP BY category
-      ORDER BY count DESC
-    `;
-
-        const result = await db.query(query);
+        const result = await Crop.findAll({
+            attributes: ['category', [db.fn('COUNT', db.col('id')), 'count']],
+            where: { status: 'available' },
+            group: ['category'],
+            order: [[db.fn('COUNT', db.col('id')), 'DESC']]
+        });
 
         const categories = [
-            { id: 'all', name: 'All Crops', count: result.rows.reduce((sum, cat) => sum + parseInt(cat.count), 0) },
-            ...result.rows.map(row => ({
+            { id: 'all', name: 'All Crops', count: result.reduce((sum, cat) => sum + parseInt(cat.count), 0) },
+            ...result.map(row => ({
                 id: row.category,
                 name: row.category.charAt(0).toUpperCase() + row.category.slice(1),
                 count: parseInt(row.count)

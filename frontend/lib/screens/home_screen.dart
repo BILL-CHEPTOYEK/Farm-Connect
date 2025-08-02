@@ -1,8 +1,47 @@
 import 'package:flutter/material.dart';
 import 'package:farmconnect/core/constants/app_constants.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  List<dynamic> crops = [];
+  bool isLoading = true;
+  String error = '';
+
+  @override
+  void initState() {
+    super.initState();
+    fetchCrops();
+  }
+
+  Future<void> fetchCrops() async {
+    try {
+      final response = await http.get(Uri.parse('http://192.168.100.144:6000/api/crops'));
+      if (response.statusCode == 200) {
+        setState(() {
+          crops = jsonDecode(response.body)['data'];
+          isLoading = false;
+        });
+      } else {
+        setState(() {
+          error = 'Failed to load crops';
+          isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        error = e.toString();
+        isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -203,6 +242,39 @@ class HomeScreen extends StatelessWidget {
                   
                   const SizedBox(height: 32),
                   
+                  // Crops Section (dynamic from backend)
+                  Text(
+                    'Available Crops',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[800],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (isLoading)
+                    const Center(child: CircularProgressIndicator()),
+                  if (error.isNotEmpty)
+                    Text(error, style: const TextStyle(color: Colors.red)),
+                  if (!isLoading && error.isEmpty)
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: crops.length,
+                      itemBuilder: (context, index) {
+                        final crop = crops[index];
+                        return Card(
+                          child: ListTile(
+                            leading: crop['image_url'] != null
+                                ? Image.network(crop['image_url'], width: 48, height: 48, fit: BoxFit.cover)
+                                : const Icon(Icons.agriculture),
+                            title: Text(crop['name'] ?? ''),
+                            subtitle: Text(crop['category'] ?? ''),
+                          ),
+                        );
+                      },
+                    ),
+                  const SizedBox(height: 32),
+                  // ...existing code for statistics and recent activity...
                   // Statistics Section
                   Container(
                     padding: const EdgeInsets.all(20),

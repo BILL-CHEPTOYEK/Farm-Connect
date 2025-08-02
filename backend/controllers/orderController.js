@@ -3,84 +3,54 @@
  * Handles order creation, management, and tracking
  */
 
-const db = require('../config/database');
+const { Order, User, FarmerListing } = require('../models');
 
 // Create new order
 const createOrder = async (req, res) => {
     try {
-        const buyer_id = req.user.id;
         const {
-            crop_id,
+            buyer_id,
+            listing_id,
             quantity,
-            delivery_address,
-            delivery_date,
-            message
+            total_price,
+            status
         } = req.body;
 
-        // Check if crop exists and has enough quantity
-        const cropQuery = 'SELECT * FROM crops WHERE id = $1 AND status = $2';
-        const cropResult = await db.query(cropQuery, [crop_id, 'available']);
-
-        if (cropResult.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Crop not found or unavailable'
-            });
-        }
-
-        const crop = cropResult.rows[0];
-
-        if (crop.quantity_available < quantity) {
-            return res.status(400).json({
-                success: false,
-                message: 'Insufficient quantity available'
-            });
-        }
-
-        // Calculate total amount
-        const total_amount = crop.price_per_unit * quantity;
-
-        // Generate order number
-        const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;
-
-        // Create order
-        const orderQuery = `
-      INSERT INTO orders (
-        order_number, buyer_id, farmer_id, crop_id, quantity,
-        unit_price, total_amount, delivery_address, delivery_date,
-        message, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      RETURNING *
-    `;
-
-        const orderValues = [
-            orderNumber, buyer_id, crop.farmer_id, crop_id, quantity,
-            crop.price_per_unit, total_amount, delivery_address, delivery_date,
-            message, 'pending'
-        ];
-
-        const orderResult = await db.query(orderQuery, orderValues);
-
-        // Update crop quantity
-        const updateCropQuery = `
-      UPDATE crops 
-      SET quantity_available = quantity_available - $1,
-          updated_at = NOW()
-      WHERE id = $2
-    `;
-        await db.query(updateCropQuery, [quantity, crop_id]);
+        const order = await Order.create({
+            buyer_id,
+            listing_id,
+            quantity,
+            total_price,
+            status
+        });
 
         res.status(201).json({
             success: true,
             message: 'Order created successfully',
-            data: orderResult.rows[0]
+            data: order
         });
     } catch (error) {
-        console.error('Error creating order:', error);
+        console.error('Create order error:', error);
         res.status(500).json({
             success: false,
             message: 'Failed to create order'
         });
+    }
+};
+
+// Get all orders
+const getAllOrders = async (req, res) => {
+    try {
+        const orders = await Order.findAll({
+            include: [
+                { model: User, as: 'buyer', attributes: ['id', 'name', 'phone_number'] },
+                { model: FarmerListing, attributes: ['id', 'price', 'quantity'] }
+            ]
+        });
+        res.json({ success: true, data: orders });
+    } catch (error) {
+        console.error('Get orders error:', error);
+        res.status(500).json({ success: false, message: 'Internal server error' });
     }
 };
 
@@ -396,6 +366,7 @@ const getOrderStats = async (req, res) => {
 
 module.exports = {
     createOrder,
+    getAllOrders,
     getUserOrders,
     getOrderById,
     updateOrderStatus,
