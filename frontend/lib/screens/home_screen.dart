@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:farmconnect/core/constants/app_constants.dart';
+import 'package:farmconnect/core/database/database_helper.dart';
+import 'package:farmconnect/core/services/sync_service.dart';
+import 'package:farmconnect/screens/offline_test_screen.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
@@ -14,31 +17,71 @@ class _HomeScreenState extends State<HomeScreen> {
   List<dynamic> crops = [];
   bool isLoading = true;
   String error = '';
+  bool isOnline = false;
+  final DatabaseHelper _dbHelper = DatabaseHelper();
+  final SyncService _syncService = SyncService();
 
   @override
   void initState() {
     super.initState();
     fetchCrops();
+    _checkConnectivityAndSync();
+  }
+
+  Future<void> _checkConnectivityAndSync() async {
+    isOnline = await _syncService.isOnline();
+    if (isOnline) {
+      // Perform background sync
+      _syncService.performFullSync();
+    }
   }
 
   Future<void> fetchCrops() async {
     try {
-      final response = await http.get(Uri.parse('http://192.168.100.144:6000/api/crops'));
-      if (response.statusCode == 200) {
-        setState(() {
-          crops = jsonDecode(response.body)['data'];
-          isLoading = false;
-        });
-      } else {
-        setState(() {
-          error = 'Failed to load crops';
-          isLoading = false;
-        });
-      }
-    } catch (e) {
       setState(() {
-        error = e.toString();
+        isLoading = true;
+        error = '';
+      });
+
+      // Check if online
+      isOnline = await _syncService.isOnline();
+      
+      if (isOnline) {
+        // Try to fetch from server
+        final response = await http.get(Uri.parse('http://192.168.100.144:6000/api/crops'));
+        if (response.statusCode == 200) {
+          final serverCrops = jsonDecode(response.body)['data'];
+          
+          // Update local database
+          await _dbHelper.bulkInsertCrops(List<Map<String, dynamic>>.from(serverCrops));
+          
+          setState(() {
+            crops = serverCrops;
+            isLoading = false;
+          });
+          return;
+        }
+      }
+      
+      // Fallback to local database
+      final localCrops = await _dbHelper.getAllCrops();
+      setState(() {
+        crops = localCrops;
         isLoading = false;
+        if (localCrops.isEmpty && !isOnline) {
+          error = 'No internet connection and no cached data available';
+        }
+      });
+      
+    } catch (e) {
+      // If network fails, try local database
+      final localCrops = await _dbHelper.getAllCrops();
+      setState(() {
+        crops = localCrops;
+        isLoading = false;
+        if (localCrops.isEmpty) {
+          error = 'No internet connection and no cached data available';
+        }
       });
     }
   }
@@ -50,123 +93,123 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Hero Welcome Section with Gradient
-            Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Theme.of(context).colorScheme.primary,
-                    Theme.of(context).colorScheme.primary.withOpacity(0.8),
-                  ],
-                ),
-                borderRadius: const BorderRadius.only(
-                  bottomLeft: Radius.circular(30),
-                  bottomRight: Radius.circular(30),
-                ),
-              ),
-              child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Good Morning!',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.white.withOpacity(0.9),
-                                  fontWeight: FontWeight.w400,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              const Text(
-                                'Welcome back',
-                                style: TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ],
-                          ),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: const Icon(
-                              Icons.notifications_outlined,
-                              color: Colors.white,
-                              size: 24,
-                            ),
-                          ),
-                        ],
+            // Hero Welcome Section with Background Image
+            Stack(
+              children: [
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    image: DecorationImage(
+                      image: AssetImage('assets/images/farmconnect.png'),
+                      fit: BoxFit.cover,
+                      colorFilter: ColorFilter.mode(
+                        Theme.of(context).colorScheme.primary.withOpacity(0.7),
+                        BlendMode.overlay,
                       ),
-                      const SizedBox(height: 30),
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.3),
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.2),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(
-                                Icons.agriculture,
-                                color: Colors.white,
-                                size: 32,
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
+                    ),
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(30),
+                      bottomRight: Radius.circular(30),
+                    ),
+                  ),
+                  child: SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text(
-                                    'FarmConnect',
+                                  Text(
+                                    'Good Morning!',
                                     style: TextStyle(
-                                      fontSize: 18,
+                                      fontSize: 16,
+                                      color: Colors.white.withOpacity(0.9),
+                                      fontWeight: FontWeight.w400,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  const Text(
+                                    'Welcome back',
+                                    style: TextStyle(
+                                      fontSize: 24,
                                       fontWeight: FontWeight.bold,
                                       color: Colors.white,
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Connecting farmers to markets directly',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.white.withOpacity(0.9),
-                                    ),
-                                  ),
                                 ],
                               ),
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                child: const Icon(
+                                  Icons.notifications_outlined,
+                                  color: Colors.white,
+                                  size: 24,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 30),
+                          Container(
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.3),
+                                width: 1,
+                              ),
                             ),
-                          ],
-                        ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Icon(Icons.agriculture, color: Colors.white, size: 32),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'FarmConnect',
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Connecting farmers to markets directly',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.white.withOpacity(0.9),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
+              ],
             ),
             
             // Content Section
@@ -211,6 +254,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       _buildQuickActionCard(
                         context,
+                        assetImage: 'assets/images/findfarmer.jpeg',
                         icon: Icons.people,
                         title: 'Find Farmers',
                         subtitle: 'Connect with local farmers',
@@ -218,6 +262,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       _buildQuickActionCard(
                         context,
+                        assetImage: 'assets/images/order.png',
                         icon: Icons.shopping_cart,
                         title: 'Place Order',
                         subtitle: 'Order fresh produce',
@@ -225,6 +270,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       _buildQuickActionCard(
                         context,
+                        assetImage: 'assets/images/crops.png',
                         icon: Icons.grass,
                         title: 'Browse Crops',
                         subtitle: 'View available crops',
@@ -232,6 +278,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       _buildQuickActionCard(
                         context,
+                        assetImage: 'assets/images/history.png',
                         icon: Icons.history,
                         title: 'Order History',
                         subtitle: 'View past orders',
@@ -242,13 +289,60 @@ class _HomeScreenState extends State<HomeScreen> {
                   
                   const SizedBox(height: 32),
                   
-                  // Crops Section (dynamic from backend)
-                  Text(
-                    'Available Crops',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey[800],
-                    ),
+                  // Debug/Test Button for Offline Database
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const OfflineTestScreen(),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.bug_report),
+                        label: const Text('Test Offline Database'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Theme.of(context).colorScheme.secondary,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 20),
+                  
+                  // Crops Section (dynamic from database with offline support)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Available Crops',
+                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey[800],
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          Icon(
+                            isOnline ? Icons.cloud_done : Icons.cloud_off,
+                            size: 16,
+                            color: isOnline ? Colors.green : Colors.grey,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            isOnline ? 'Online' : 'Offline',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isOnline ? Colors.green : Colors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 16),
                   if (isLoading)
@@ -407,7 +501,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildQuickActionCard(
     BuildContext context, {
-    required IconData icon,
+    String? assetImage,
+    IconData? icon,
     required String title,
     required String subtitle,
     required List<Color> gradient,
@@ -441,19 +536,53 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    icon,
-                    size: 28,
-                    color: Colors.white,
+                Expanded(
+                  flex: 3,
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: assetImage != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.asset(
+                              assetImage,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(
+                                    icon ?? Icons.help_outline,
+                                    size: 48,
+                                    color: Colors.white,
+                                  ),
+                                );
+                              },
+                            ),
+                          )
+                        : Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              icon ?? Icons.help_outline,
+                              size: 48,
+                              color: Colors.white,
+                            ),
+                          ),
                   ),
                 ),
                 const SizedBox(height: 12),
+                Expanded(
+                  flex: 2,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
                 Text(
                   title,
                   style: const TextStyle(
@@ -473,6 +602,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
+                ),
+                    ],
+                  ),
                 ),
               ],
             ),
