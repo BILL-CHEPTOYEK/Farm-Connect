@@ -11,7 +11,7 @@ module.exports = {
                 unit_of_measure: 'kg',
                 seasonal_months: [3, 4, 5, 9, 10, 11],
                 description: 'Maize is a staple cereal crop.',
-                image_url: 'https://example.com/maize.jpg',
+                image_url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80',
                 createdAt: new Date(),
                 updatedAt: new Date()
             },
@@ -21,7 +21,7 @@ module.exports = {
                 unit_of_measure: 'kg',
                 seasonal_months: [1, 2, 3, 7, 8, 9],
                 description: 'Tomato is a popular vegetable.',
-                image_url: 'https://example.com/tomato.jpg',
+                image_url: 'https://images.unsplash.com/photo-1465101046530-73398c7f28ca?auto=format&fit=crop&w=400&q=80',
                 createdAt: new Date(),
                 updatedAt: new Date()
             }

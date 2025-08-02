@@ -3,7 +3,7 @@
  * Handles crop listing, searching, and management
  */
 
-const { Crop, User, Review } = require('../models');
+const { Crop, User, FarmerListing, Review } = require('../models');
 
 // Get all crops with pagination and filtering
 const getAllCrops = async (req, res) => {
@@ -21,18 +21,16 @@ const getAllCrops = async (req, res) => {
         } = req.query;
 
         const offset = (page - 1) * limit;
-        let whereConditions = { status: 'available' };
+        let whereConditions = {};
         let include = [
             {
-                model: User,
-                as: 'farmer',
-                attributes: ['name', 'phone', 'verified']
-            },
-            {
-                model: Review,
-                as: 'reviews',
-                attributes: ['id'],
-                required: false
+                model: FarmerListing,
+                include: [
+                    {
+                        model: User,
+                        attributes: ['name', 'phone_number', 'is_verified'],
+                    }
+                ]
             }
         ];
 
@@ -40,7 +38,7 @@ const getAllCrops = async (req, res) => {
         if (search) {
             whereConditions[Op.or] = [
                 { name: { [Op.iLike]: `%${search}%` } },
-                { '$farmer.name$': { [Op.iLike]: `%${search}%` } },
+                { '$FarmerListings.User.name$': { [Op.iLike]: `%${search}%` } },
                 { location: { [Op.iLike]: `%${search}%` } }
             ];
         }
@@ -64,24 +62,24 @@ const getAllCrops = async (req, res) => {
             whereConditions.price_per_unit = { [Op.lte]: maxPrice };
         }
 
+        // corrected sortBy to use correct column name
+        const validSortBy = ['createdAt', 'updatedAt', 'name', 'category'].includes(sortBy) ? sortBy : 'createdAt';
         const result = await Crop.findAndCountAll({
             where: whereConditions,
             include,
-            order: [[sortBy, sortOrder]],
+            order: [[validSortBy, sortOrder]],
             limit,
             offset
         });
 
         res.json({
             success: true,
-            data: {
-                crops: result.rows,
-                pagination: {
-                    page: parseInt(page),
-                    limit: parseInt(limit),
-                    total: result.count,
-                    pages: Math.ceil(result.count / limit)
-                }
+            data: result.rows,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total: result.count,
+                pages: Math.ceil(result.count / limit)
             }
         });
     } catch (error) {

@@ -265,7 +265,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         return Card(
                           child: ListTile(
                             leading: crop['image_url'] != null
-                                ? Image.network(crop['image_url'], width: 48, height: 48, fit: BoxFit.cover)
+                                ? Image.network(
+                                    crop['image_url'],
+                                    width: 48,
+                                    height: 48,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return const Icon(Icons.agriculture);
+                                    },
+                                  )
                                 : const Icon(Icons.agriculture),
                             title: Text(crop['name'] ?? ''),
                             subtitle: Text(crop['category'] ?? ''),
